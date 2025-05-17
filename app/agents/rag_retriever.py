@@ -8,19 +8,51 @@ import re
 import json
 import datetime
 from datetime import datetime, timedelta
-import numpy as np
-from openai import OpenAI
+import math
+import csv
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Union
 
+try:
+    import numpy as np  # type: ignore
+except Exception:  # pragma: no cover - numpy might be unavailable
+    np = None
+
+try:
+    from openai import OpenAI  # type: ignore
+except Exception:  # pragma: no cover - openai package might be missing
+    OpenAI = None
+
+USE_DUMMY = OpenAI is None or os.environ.get("USE_DUMMY") == "1"
+
+
+def _percentile(values: List[float], pct: float) -> float:
+    """Lightweight percentile calculation used when numpy is unavailable."""
+    if not values:
+        return 0.0
+    values = sorted(values)
+    k = (len(values) - 1) * pct / 100.0
+    f = math.floor(k)
+    c = math.ceil(k)
+    if f == c:
+        return values[int(k)]
+    d0 = values[int(f)] * (c - k)
+    d1 = values[int(c)] * (k - f)
+    return d0 + d1
+
 def get_openai_client():
-    """Get the OpenAI client with the current API key from environment"""
+    """Get the OpenAI client with the current API key from environment."""
+    if USE_DUMMY:
+        raise RuntimeError("OpenAI client not available in dummy mode")
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise ValueError("OPENAI_API_KEY environment variable is not set")
     return OpenAI(api_key=api_key)
 
 def get_vector_store_id():
-    """Get the Vector Store ID from environment"""
+    """Get the Vector Store ID from environment."""
+    if USE_DUMMY:
+        raise RuntimeError("Vector store not available in dummy mode")
     vector_store_id = os.environ.get("OPENAI_VECTOR_STORE_ID")
     if not vector_store_id:
         raise ValueError("OPENAI_VECTOR_STORE_ID environment variable is not set")
@@ -206,20 +238,45 @@ def extract_auction_company(text: str) -> str:
     # Default
     return "Unknown Auction"
 
-def search_with_rag(search_query: str, make: Optional[str] = None, model: Optional[str] = None, year: Optional[int] = None, k: int = 10) -> List[Dict[str, Any]]:
-    """
-    Perform RAG-based search for comparable farm equipment sales
-    
-    Args:
-        search_query: The search query text
-        make: Equipment manufacturer (e.g., "John Deere")
-        model: Equipment model (e.g., "8370R")
-        year: Equipment year (e.g., 2020)
-        k: Maximum number of results to return
-        
-    Returns:
-        List of comparable sales with metadata
-    """
+def search_with_rag(
+    search_query: str,
+    make: Optional[str] = None,
+    model: Optional[str] = None,
+    year: Optional[int] = None,
+    k: int = 10,
+) -> List[Dict[str, Any]]:
+    """Perform search for comparable farm equipment sales."""
+
+    if USE_DUMMY:
+        csv_path = (
+            Path(__file__).resolve().parents[2] / "docs" / "sample_upload.csv"
+        )
+        rows: List[Dict[str, Any]] = []
+        with open(csv_path, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if make and row["make"].lower() != make.lower():
+                    continue
+                if model and row["model"].lower() != model.lower():
+                    continue
+                if year and int(row["year"]) != year:
+                    continue
+                rows.append(row)
+
+        results: List[Dict[str, Any]] = []
+        for row in rows[:k]:
+            results.append(
+                {
+                    "sale_id": f"{row['make']} {row['model']} - Dummy Auction",
+                    "item_name": f"{row['make']} {row['model']}",
+                    "auction_company": "Dummy Auction",
+                    "price": float(row["price"]),
+                    "sale_date": f"{row['year']}-01-01",
+                    "text": "Sample record",
+                }
+            )
+        return results
+
     try:
         # Get OpenAI client and vector store ID
         client = get_openai_client()
@@ -347,8 +404,12 @@ def search_with_rag(search_query: str, make: Optional[str] = None, model: Option
         if len(recent_results) >= 5:
             print("Removing price outliers...")
             prices = [item['price'] for item in recent_results]
-            q1 = np.percentile(prices, 25)
-            q3 = np.percentile(prices, 75)
+            if np is not None:
+                q1 = np.percentile(prices, 25)
+                q3 = np.percentile(prices, 75)
+            else:
+                q1 = _percentile(prices, 25)
+                q3 = _percentile(prices, 75)
             iqr = q3 - q1
             lower_bound = q1 - (1.5 * iqr)
             upper_bound = q3 + (1.5 * iqr)

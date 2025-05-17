@@ -1,9 +1,19 @@
 import json
 import os
-from openai import OpenAI
+from math import sqrt
+from statistics import mean, stdev
+
+try:
+    from openai import OpenAI  # type: ignore
+except Exception:  # pragma: no cover - openai may be unavailable
+    OpenAI = None
+
+USE_DUMMY = OpenAI is None or os.environ.get("USE_DUMMY") == "1"
 
 def get_openai_client():
-    """Get the OpenAI client with the current API key from environment"""
+    """Get the OpenAI client with the current API key from environment."""
+    if USE_DUMMY:
+        raise RuntimeError("OpenAI client not available in dummy mode")
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise ValueError("OPENAI_API_KEY environment variable is not set")
@@ -55,6 +65,20 @@ async def acall(data):
     Uses OpenAI directly to perform valuation
     """
     try:
+        if USE_DUMMY:
+            # Simple offline valuation using average of comp prices
+            comps = data.get("comps", []) if isinstance(data, dict) else []
+            prices = [c.get("price", 0) for c in comps]
+            fmv = round(mean(prices), 2) if prices else 0.0
+            conf = "high" if len(prices) >= 5 else "medium" if len(prices) >= 3 else "low"
+            return {
+                "fmv": fmv,
+                "confidence": conf,
+                "adjustments": {"age": 0, "usage": 0, "condition": 0},
+                "top3": comps[:3],
+                "explanation": "Dummy valuation using sample data",
+            }
+
         # Get the OpenAI client with current API key
         client = get_openai_client()
         

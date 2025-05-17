@@ -6,8 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 import json, asyncio
 
-from .orchestrator import run_chain
-from .schemas import ValuationResponse
+from app.orchestrator import run_chain
+from app.schemas import ValuationResponse
 
 # ================= FastAPI app =================
 app = FastAPI(title="Ag IQ v2 – Agent Edition")

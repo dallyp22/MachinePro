@@ -1,10 +1,18 @@
 import json
 import os
 import textwrap
-from openai import OpenAI
+
+try:
+    from openai import OpenAI  # type: ignore
+except Exception:  # pragma: no cover - openai may be missing
+    OpenAI = None
+
+USE_DUMMY = OpenAI is None or os.environ.get("USE_DUMMY") == "1"
 
 def get_openai_client():
-    """Get the OpenAI client with the current API key from environment"""
+    """Get the OpenAI client with the current API key from environment."""
+    if USE_DUMMY:
+        raise RuntimeError("OpenAI client not available in dummy mode")
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise ValueError("OPENAI_API_KEY environment variable is not set")
@@ -45,6 +53,26 @@ async def acall(data):
     Uses OpenAI directly to format valuation results to conform to our schema
     """
     try:
+        if USE_DUMMY:
+            if isinstance(data, str):
+                data = json.loads(data)
+            output = {
+                "fair_market_value": data.get("fmv", 0),
+                "confidence": data.get("confidence", "low"),
+                "comparable_sales": [
+                    {
+                        "sale_id": c.get("sale_id"),
+                        "price": c.get("price"),
+                        "sale_date": c.get("sale_date"),
+                        "distance_miles": c.get("distance_miles"),
+                    }
+                    for c in data.get("top3", [])
+                ],
+                "adjustments": data.get("adjustments", {"age": 0, "usage": 0, "condition": 0}),
+                "explanation": data.get("explanation", ""),
+            }
+            return json.dumps(output)
+
         # Get the OpenAI client with current API key
         client = get_openai_client()
         
